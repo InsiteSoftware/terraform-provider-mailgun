@@ -59,12 +59,12 @@ func (p *mailgunProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"requests_per_second": schema.Float64Attribute{
 				Optional: true,
 				Description: "Maximum Mailgun API requests per second for this provider instance. " +
-					"Defaults to 8; set to 0 to disable pacing. Can also be set with MAILGUN_REQUESTS_PER_SECOND.",
+					"0 or unset disables pacing. Can also be set with MAILGUN_REQUESTS_PER_SECOND.",
 			},
 			"max_retries": schema.Int64Attribute{
 				Optional: true,
 				Description: "Number of times to retry a request that receives HTTP 429. " +
-					"Defaults to 5; set to 0 to disable retries. Can also be set with MAILGUN_MAX_RETRIES.",
+					"0 or unset disables retries. Can also be set with MAILGUN_MAX_RETRIES.",
 			},
 		},
 	}
@@ -84,7 +84,6 @@ func (p *mailgunProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	rps := data.RequestsPerSecond.ValueFloat64()
 	if data.RequestsPerSecond.IsNull() {
-		rps = mailgun.DefaultRequestsPerSecond
 		if v := os.Getenv("MAILGUN_REQUESTS_PER_SECOND"); v != "" {
 			f, err := strconv.ParseFloat(v, 64)
 			if err != nil {
@@ -97,7 +96,6 @@ func (p *mailgunProvider) Configure(ctx context.Context, req provider.ConfigureR
 	}
 	maxRetries := data.MaxRetries.ValueInt64()
 	if data.MaxRetries.IsNull() {
-		maxRetries = mailgun.DefaultMaxRetries
 		if v := os.Getenv("MAILGUN_MAX_RETRIES"); v != "" {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {

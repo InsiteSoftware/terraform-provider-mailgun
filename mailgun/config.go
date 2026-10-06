@@ -8,19 +8,12 @@ import (
 	"github.com/mailgun/mailgun-go/v5"
 )
 
-// Defaults applied by the provider when requests_per_second / max_retries are
-// set neither in configuration nor via environment variables.
-const (
-	DefaultRequestsPerSecond = 8
-	DefaultMaxRetries        = 5
-)
-
 // Config struct holds API key and optional request pacing settings.
 type Config struct {
 	APIKey string
 
 	// RequestsPerSecond caps outgoing API requests for the whole provider
-	// instance. 0 disables pacing.
+	// instance. 0 disables pacing (upstream behaviour).
 	RequestsPerSecond float64
 	// MaxRetries is how many times a 429 response is retried. 0 disables.
 	MaxRetries int
