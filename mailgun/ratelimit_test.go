@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -154,7 +155,7 @@ func TestRetryRewindsPOSTBody(t *testing.T) {
 }
 
 func TestRetryPausesOtherRequests(t *testing.T) {
-	// The first request gets a 429 with Retry-After; a second request started
+	// The first request gets a 429 with X-RateLimit-Reset; a second request started
 	// during the pause must not reach the server until the pause has ended.
 	var calls int64
 	var mu sync.Mutex
@@ -164,7 +165,7 @@ func TestRetryPausesOtherRequests(t *testing.T) {
 		arrivals = append(arrivals, time.Now())
 		mu.Unlock()
 		if atomic.AddInt64(&calls, 1) == 1 {
-			w.Header().Set("Retry-After", "1")
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Second).UnixMilli(), 10))
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
@@ -208,4 +209,37 @@ func TestRetryPausesOtherRequests(t *testing.T) {
 			t.Fatalf("request %d reached server %s before pause ended", i+2, pausedUntil.Sub(at))
 		}
 	}
+}
+
+func TestRetryDelay(t *testing.T) {
+	now := time.Now()
+	header := func(kv ...string) *http.Response {
+		h := http.Header{}
+		for i := 0; i < len(kv); i += 2 {
+			h.Set(kv[i], kv[i+1])
+		}
+		return &http.Response{Header: h}
+	}
+	within := func(name string, got, want time.Duration) {
+		t.Helper()
+		if diff := got - want; diff < -100*time.Millisecond || diff > 100*time.Millisecond {
+			t.Errorf("%s: got %s, want ~%s", name, got, want)
+		}
+	}
+
+	within("reset absolute epoch ms",
+		retryDelay(header("X-RateLimit-Reset", strconv.FormatInt(now.Add(3*time.Second).UnixMilli(), 10)), 0),
+		3*time.Second+250*time.Millisecond)
+	within("reset relative ms",
+		retryDelay(header("X-RateLimit-Reset", "2000"), 0),
+		2*time.Second+250*time.Millisecond)
+	within("reset already passed",
+		retryDelay(header("X-RateLimit-Reset", strconv.FormatInt(now.Add(-time.Minute).UnixMilli(), 10)), 0),
+		250*time.Millisecond)
+	within("garbage reset falls back to backoff",
+		retryDelay(header("X-RateLimit-Reset", "soon"), 1), 2*time.Second)
+	within("no headers backs off exponentially",
+		retryDelay(header(), 2), 4*time.Second)
+	within("backoff capped at 30s",
+		retryDelay(header(), 10), 30*time.Second)
 }

@@ -125,25 +125,43 @@ func (t *rateLimitedTransport) waitForPause(ctx context.Context) error {
 	}
 }
 
-// retryDelay honours a Retry-After header (seconds or HTTP date) if Mailgun
-// sends one, otherwise backs off exponentially: 1s, 2s, 4s ... capped at 30s.
+// retryDelay picks how long to wait after a 429: until Mailgun's
+// X-RateLimit-Reset time if the header is present and valid, otherwise
+// exponential backoff: 1s, 2s, 4s ... capped at 30s.
 func retryDelay(resp *http.Response, attempt int) time.Duration {
-	if v := resp.Header.Get("Retry-After"); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
-			return time.Duration(secs)*time.Second + 250*time.Millisecond
-		}
-		if at, err := http.ParseTime(v); err == nil {
-			if d := time.Until(at); d > 0 {
-				return d + 250*time.Millisecond
-			}
-			return 250 * time.Millisecond
-		}
+	if d, ok := rateLimitResetDelay(resp.Header.Get("X-RateLimit-Reset"), time.Now()); ok {
+		return d
 	}
 	d := time.Second << attempt
 	if d > 30*time.Second || d <= 0 {
 		d = 30 * time.Second
 	}
 	return d
+}
+
+// rateLimitResetDelay parses Mailgun's X-RateLimit-Reset header, documented as
+// "Unix milliseconds (UTC) until the limit resets". Values that look like an
+// epoch timestamp (after 2001) are treated as the absolute reset time; smaller
+// values as milliseconds remaining. A small margin is added either way.
+func rateLimitResetDelay(v string, now time.Time) (time.Duration, bool) {
+	if v == "" {
+		return 0, false
+	}
+	ms, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || ms < 0 {
+		return 0, false
+	}
+	const margin = 250 * time.Millisecond
+	var d time.Duration
+	if ms >= 1e12 {
+		d = time.UnixMilli(ms).Sub(now)
+	} else {
+		d = time.Duration(ms) * time.Millisecond
+	}
+	if d < 0 {
+		d = 0
+	}
+	return d + margin, true
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
